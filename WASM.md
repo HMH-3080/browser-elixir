@@ -99,6 +99,13 @@ dies silently is near-impossible to debug and that cost real time here.
 
 Everything else is upstream and unmodified. When updating the runtime, re-apply all four.
 
+## Single-threaded build
+
+[`runtime/`](runtime/README.md) builds a **no-pthread** AtomVM from FissionVM. That build does not
+use `SharedArrayBuffer` and does not need COOP/COEP; it is the runtime LiveCodes ships as
+[`@hmh-3080/atomvm-wasm`](https://www.npmjs.com/package/@hmh-3080/atomvm-wasm). It is built
+independently of the Popcorn mirror described above, and the demo page does not load it yet.
+
 ## Rebuilding the runtime
 
 To own the whole stack — and to lift the 16 MiB heap ceiling described in

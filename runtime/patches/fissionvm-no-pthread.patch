@@ -1,0 +1,338 @@
+diff --git a/src/libAtomVM/globalcontext.c b/src/libAtomVM/globalcontext.c
+index 08988d4..f83cf3c 100644
+--- a/src/libAtomVM/globalcontext.c
++++ b/src/libAtomVM/globalcontext.c
+@@ -830,6 +830,14 @@ run_result_t globalcontext_run(GlobalContext *glb, Module *startup_module, FILE
+         context_execute_loop(ctx, init_module, "boot", 1);
+     }
+ 
++#ifdef AVM_EMSCRIPTEN_NO_PTHREAD
++    if (glb->single_thread_idle) {
++        // The VM has no runnable process. Keep the initial context alive and
++        // let the platform main loop call scheduler_entry_point again.
++        glb->main_ctx = ctx;
++        return RUN_IDLE;
++    }
++#endif
+     term ret_value = ctx->x[0];
+     if (out_f) {
+         fprintf(out_f, "Return value: ");
+diff --git a/src/libAtomVM/globalcontext.h b/src/libAtomVM/globalcontext.h
+index 26e6c9c..ea290c3 100644
+--- a/src/libAtomVM/globalcontext.h
++++ b/src/libAtomVM/globalcontext.h
+@@ -96,6 +96,7 @@ typedef enum run_result_t
+     RUN_MEMORY_FAILURE = 1,
+     RUN_RESULT_NOT_OK = 2,
+     RUN_NO_ENTRY_POINT = 3,
++    RUN_IDLE = 4,
+ } run_result_t;
+ 
+ struct GlobalContext
+@@ -159,6 +160,10 @@ struct GlobalContext
+     bool ATOMIC scheduler_stop_all;
+ #else
+     bool scheduler_stop_all;
++#ifdef AVM_EMSCRIPTEN_NO_PTHREAD
++    bool single_thread_idle;
++    Context *main_ctx;
++#endif
+ #endif
+ 
+ #ifndef AVM_NO_SMP
+diff --git a/src/libAtomVM/nifs.c b/src/libAtomVM/nifs.c
+index da1f2e4..86116d5 100644
+--- a/src/libAtomVM/nifs.c
++++ b/src/libAtomVM/nifs.c
+@@ -24,6 +24,10 @@
+ 
+ #include "nifs.h"
+ 
++#ifdef ATOMVM_HAS_MBEDTLS
++#include <mbedtls/md5.h>
++#endif
++
+ #include "popcorn/popcorn_nifs.h"
+ 
+ #include <errno.h>
+@@ -267,6 +271,7 @@ static term nif_code_all_available(Context *ctx, int argc, term argv[]);
+ static term nif_code_all_loaded(Context *ctx, int argc, term argv[]);
+ static term nif_code_load_abs(Context *ctx, int argc, term argv[]);
+ static term nif_code_load_binary(Context *ctx, int argc, term argv[]);
++static term nif_erlang_md5(Context *ctx, int argc, term argv[]);
+ static term nif_code_ensure_loaded(Context *ctx, int argc, term argv[]);
+ static term nif_code_get_object_code(Context *ctx, int argc, term argv[]);
+ static term nif_code_server_is_loaded(Context *ctx, int argc, term argv[]);
+@@ -981,6 +986,10 @@ static const struct Nif crc32_1_nif = {
+     .base.type = NIFFunctionType,
+     .nif_ptr = nif_erlang_crc32
+ };
++static const struct Nif erlang_md5_nif = {
++    .base.type = NIFFunctionType,
++    .nif_ptr = nif_erlang_md5
++};
+ static const struct Nif crc32_2_nif = {
+     .base.type = NIFFunctionType,
+     .nif_ptr = nif_erlang_crc32
+@@ -7282,6 +7291,43 @@ static uint32_t crc32_combine_uint(uint32_t crc1, uint32_t crc2, size_t len2)
+ }
+ #endif
+ 
++static term nif_erlang_md5(Context *ctx, int argc, term argv[])
++{
++    UNUSED(argc);
++#ifdef ATOMVM_HAS_MBEDTLS
++    term data = argv[0];
++    const void *data_ptr;
++    size_t data_size;
++    char *alloc_ptr = NULL;
++
++    if (LIKELY(term_is_binary(data))) {
++        data_ptr = term_binary_data(data);
++        data_size = term_binary_size(data);
++    } else if (LIKELY(term_is_list(data) || term_is_nil(data))) {
++        char *buf = NULL;
++        term status = iolist_to_buffer(data, &buf, &data_size);
++        if (UNLIKELY(status != OK_ATOM)) {
++            RAISE_ERROR(status);
++        }
++        data_ptr = buf;
++        alloc_ptr = buf;
++    } else {
++        RAISE_ERROR(BADARG_ATOM);
++    }
++
++    unsigned char digest[16];
++    mbedtls_md5((const unsigned char *) data_ptr, data_size, digest);
++    free(alloc_ptr);
++
++    if (UNLIKELY(memory_ensure_free(ctx, term_binary_heap_size(16)) != MEMORY_GC_OK)) {
++        RAISE_ERROR(OUT_OF_MEMORY_ATOM);
++    }
++    return term_from_literal_binary(digest, 16, &ctx->heap, ctx->global);
++#else
++    RAISE_ERROR(UNDEF_ATOM);
++#endif
++}
++
+ static term nif_erlang_crc32(Context *ctx, int argc, term argv[])
+ {
+     uint32_t old_crc_val = 0;
+diff --git a/src/libAtomVM/nifs.gperf b/src/libAtomVM/nifs.gperf
+index c7ce64c..acc6d95 100644
+--- a/src/libAtomVM/nifs.gperf
++++ b/src/libAtomVM/nifs.gperf
+@@ -54,6 +54,7 @@ calendar:system_time_to_universal_time/2, &system_time_to_universal_time_nif
+ os:getenv/1, &os_getenv_nif
+ os:system_time/0, &system_time_nif
+ os:system_time/1, &system_time_nif
++erlang:md5/1, &erlang_md5_nif
+ erlang:atom_to_binary/1, &atom_to_binary_nif
+ erlang:atom_to_binary/2, &atom_to_binary_nif
+ erlang:atom_to_list/1, &atom_to_list_nif
+diff --git a/src/libAtomVM/scheduler.c b/src/libAtomVM/scheduler.c
+index a856d60..c392633 100644
+--- a/src/libAtomVM/scheduler.c
++++ b/src/libAtomVM/scheduler.c
+@@ -261,7 +261,15 @@ static Context *scheduler_run0(GlobalContext *global)
+ #ifdef AVM_TASK_DRIVER_ENABLED
+         globalcontext_process_task_driver_queues(global);
+ #endif
++#ifdef AVM_EMSCRIPTEN_NO_PTHREAD
++        if (result == NULL) {
++            global->single_thread_idle = true;
++            return NULL;
++        }
++        global->single_thread_idle = false;
++#else
+         SMP_MUTEX_LOCK(global->schedulers_mutex);
++#endif
+     } while (result == NULL);
+ 
+ #ifndef AVM_NO_SMP
+diff --git a/src/platforms/emscripten/CMakeLists.txt b/src/platforms/emscripten/CMakeLists.txt
+index ce48ac2..e1afff5 100644
+--- a/src/platforms/emscripten/CMakeLists.txt
++++ b/src/platforms/emscripten/CMakeLists.txt
+@@ -30,6 +30,10 @@ endif ()
+ 
+ # Options that make sense for this platform
+ option(AVM_DISABLE_SMP "Disable SMP." OFF)
++option(AVM_EMSCRIPTEN_NO_PTHREAD "Build without pthreads (single-threaded)." OFF)
++if (AVM_EMSCRIPTEN_NO_PTHREAD)
++    set(AVM_DISABLE_SMP ON)
++endif ()
+ option(AVM_USE_32BIT_FLOAT "Use 32 bit floats." OFF)
+ option(AVM_VERBOSE_ABORT "Print module and line number on VM abort" OFF)
+ option(AVM_CREATE_STACKTRACES "Create stacktraces" ON)
+diff --git a/src/platforms/emscripten/src/CMakeLists.txt b/src/platforms/emscripten/src/CMakeLists.txt
+index 027f474..9f80d2a 100644
+--- a/src/platforms/emscripten/src/CMakeLists.txt
++++ b/src/platforms/emscripten/src/CMakeLists.txt
+@@ -26,16 +26,29 @@ target_compile_features(AtomVM PUBLIC c_std_11)
+ 
+ add_subdirectory(../../../libAtomVM libAtomVM)
+ target_link_libraries(AtomVM PUBLIC libAtomVM)
+-target_compile_options(libAtomVM PUBLIC -O3 -fno-exceptions -fno-rtti -pthread -sINLINING_LIMIT -sUSE_ZLIB=1)
++if (AVM_EMSCRIPTEN_NO_PTHREAD)
++    target_compile_definitions(libAtomVM PUBLIC AVM_EMSCRIPTEN_NO_PTHREAD=1)
++    target_compile_options(libAtomVM PUBLIC -O1 -fno-exceptions -fno-rtti -sINLINING_LIMIT -sUSE_ZLIB=1)
++else()
++    target_compile_options(libAtomVM PUBLIC -O3 -fno-exceptions -fno-rtti -pthread -sINLINING_LIMIT -sUSE_ZLIB=1)
++endif()
+ target_compile_definitions(libAtomVM PRIVATE WITH_ZLIB)
+-target_link_options(AtomVM PRIVATE -sEXPORTED_RUNTIME_METHODS=ccall,cwrap,stringToNewUTF8,FS -sEMULATE_FUNCTION_POINTER_CASTS=1 -sEXPORTED_FUNCTIONS=_malloc,_cast,_call,_next_tracked_object_key,_main -sEXPORT_ES6=1 -sUSE_ZLIB=1 -O3 -pthread -sFETCH -lwebsocket.js --pre-js ${CMAKE_CURRENT_SOURCE_DIR}/atomvm.pre.js)
++if (AVM_EMSCRIPTEN_NO_PTHREAD)
++    target_link_options(AtomVM PRIVATE -sEXPORTED_RUNTIME_METHODS=ccall,cwrap,stringToNewUTF8,FS,callMain -sEMULATE_FUNCTION_POINTER_CASTS=1 -sEXPORTED_FUNCTIONS=_malloc,_cast,_call,_next_tracked_object_key,_main -sEXPORT_ES6=1 -sUSE_ZLIB=1 -O1 -sFETCH -lwebsocket.js --pre-js ${CMAKE_CURRENT_SOURCE_DIR}/atomvm.pre.js)
++else()
++    target_link_options(AtomVM PRIVATE -sEXPORTED_RUNTIME_METHODS=ccall,cwrap,stringToNewUTF8,FS -sEMULATE_FUNCTION_POINTER_CASTS=1 -sEXPORTED_FUNCTIONS=_malloc,_cast,_call,_next_tracked_object_key,_main -sEXPORT_ES6=1 -sUSE_ZLIB=1 -O3 -pthread -sFETCH -lwebsocket.js --pre-js ${CMAKE_CURRENT_SOURCE_DIR}/atomvm.pre.js)
++endif()
+ set(CMAKE_EXECUTABLE_SUFFIX ".mjs")
+ if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+     target_link_options(AtomVM PRIVATE -sASSERTIONS=2 -sSAFE_HEAP -sSTACK_OVERFLOW_CHECK)
+ endif()
+ 
+ if (AVM_EMSCRIPTEN_ENV STREQUAL "web")
+-    target_link_options(AtomVM PRIVATE -lworkerfs.js -sENVIRONMENT=web,worker -sPROXY_TO_PTHREAD)
++    if (AVM_EMSCRIPTEN_NO_PTHREAD)
++        target_link_options(AtomVM PRIVATE -lworkerfs.js -sENVIRONMENT=web,worker)
++    else()
++        target_link_options(AtomVM PRIVATE -lworkerfs.js -sENVIRONMENT=web,worker -sPROXY_TO_PTHREAD)
++    endif()
+ else()
+     target_link_options(AtomVM PRIVATE -sNODERAWFS -sENVIRONMENT=node)
+ endif()
+diff --git a/src/platforms/emscripten/src/lib/emscripten_sys.h b/src/platforms/emscripten/src/lib/emscripten_sys.h
+index 8e396e9..803fd50 100644
+--- a/src/platforms/emscripten/src/lib/emscripten_sys.h
++++ b/src/platforms/emscripten/src/lib/emscripten_sys.h
+@@ -44,6 +44,11 @@
+ 
+ #include "sys_mbedtls.h"
+ 
++#ifdef AVM_EMSCRIPTEN_NO_PTHREAD
++#undef emscripten_dispatch_to_thread
++#define emscripten_dispatch_to_thread(thread, signature, func, satellite, ...) func(__VA_ARGS__)
++#endif
++
+ struct PromiseResource
+ {
+     em_promise_t promise;
+@@ -143,6 +148,6 @@ void sys_enqueue_emscripten_htmlevent_message(GlobalContext *glb, int32_t target
+ void sys_enqueue_emscripten_unregister_htmlevent_message(GlobalContext *glb, struct HTMLEventUserDataResource *rsrc);
+ size_t sys_get_next_tracked_object_key(GlobalContext *glb);
+ void sys_promise_resolve_int_and_destroy(em_promise_t promise, em_promise_result_t result, int value);
+-void sys_promise_resolve_str_and_destroy(em_promise_t promise, em_promise_result_t result, int value);
++void sys_promise_resolve_str_and_destroy(em_promise_t promise, em_promise_result_t result, const char *value);
+ 
+ #endif
+diff --git a/src/platforms/emscripten/src/lib/sys.c b/src/platforms/emscripten/src/lib/sys.c
+index 661887e..c5073c2 100644
+--- a/src/platforms/emscripten/src/lib/sys.c
++++ b/src/platforms/emscripten/src/lib/sys.c
+@@ -48,6 +48,18 @@
+ #include "platform_defaultatoms.h"
+ #include "websocket_nifs.h"
+ 
++#ifdef AVM_EMSCRIPTEN_NO_PTHREAD
++#define pthread_mutex_init(mutex, attr) 0
++#define pthread_mutex_destroy(mutex) 0
++#define pthread_mutex_lock(mutex) 0
++#define pthread_mutex_unlock(mutex) 0
++#define pthread_cond_init(cond, attr) 0
++#define pthread_cond_destroy(cond) 0
++#define pthread_cond_signal(cond) 0
++#define pthread_cond_wait(cond, mutex) 0
++#define pthread_cond_timedwait(cond, mutex, abstime) 0
++#endif
++
+ size_t sys_get_next_tracked_object_key(GlobalContext *glb)
+ {
+     struct EmscriptenPlatformData *platform = glb->platform_data;
+@@ -78,7 +90,7 @@ void sys_promise_resolve_int_and_destroy(em_promise_t promise, em_promise_result
+  * @param result `EM_PROMISE_FULFILL` to resolve or `EM_PROMISE_REJECT` to reject
+  * @param value value to resolve or reject to
+  */
+-void sys_promise_resolve_str_and_destroy(em_promise_t promise, em_promise_result_t result, int value)
++void sys_promise_resolve_str_and_destroy(em_promise_t promise, em_promise_result_t result, const char *value)
+ {
+     if (result == EM_PROMISE_FULFILL) {
+         EM_ASM({ promiseMap.get($0).resolve(UTF8ToString($1)); }, promise, value);
+@@ -237,7 +249,7 @@ static void sys_enqueue_emscripten_message(GlobalContext *glb, struct Emscripten
+     pthread_mutex_unlock(&platform->poll_mutex);
+ }
+ 
+-#ifndef AVM_NO_SMP
++#if !defined(AVM_NO_SMP) || defined(AVM_TASK_DRIVER_ENABLED)
+ void sys_signal(GlobalContext *glb)
+ {
+     struct EmscriptenMessageBase *message = malloc(sizeof(struct EmscriptenMessageBase));
+diff --git a/src/platforms/emscripten/src/main.c b/src/platforms/emscripten/src/main.c
+index dc3999b..b8726c1 100644
+--- a/src/platforms/emscripten/src/main.c
++++ b/src/platforms/emscripten/src/main.c
+@@ -29,6 +29,7 @@
+ #include <globalcontext.h>
+ #include <iff.h>
+ #include <module.h>
++#include <scheduler.h>
+ #include <sys.h>
+ 
+ #include "lib/emscripten_sys.h"
+@@ -37,6 +38,18 @@
+ 
+ static GlobalContext *global = NULL;
+ static Module *main_module = NULL;
++static bool main_loop_started = false;
++
++#ifdef AVM_EMSCRIPTEN_NO_PTHREAD
++static void main_loop(void *arg)
++{
++    GlobalContext *glb = arg;
++    scheduler_entry_point(glb);
++    if (!glb->single_thread_idle) {
++        emscripten_cancel_main_loop();
++    }
++}
++#endif
+ 
+ /**
+  * @brief Load a module in .avm or .beam format.
+@@ -97,6 +110,14 @@ static int start(void)
+ 
+     run_result_t ret_value = globalcontext_run(global, main_module, stdout, 0, NULL);
+ 
++#ifdef AVM_EMSCRIPTEN_NO_PTHREAD
++    if (ret_value == RUN_IDLE) {
++        main_loop_started = true;
++        emscripten_set_main_loop_arg(main_loop, global, 0, false);
++        return EXIT_SUCCESS;
++    }
++#endif
++
+     int status;
+     if (ret_value == RUN_SUCCESS) {
+         status = EXIT_SUCCESS;
+@@ -180,12 +201,20 @@ int main(int argc, char **argv)
+         result = start();
+     }
+ 
+-    globalcontext_destroy(global);
+-    global = NULL;
++    if (!main_loop_started) {
++        globalcontext_destroy(global);
++        global = NULL;
++    }
+ 
+     if (main_module) {
+         main_module = NULL;
+     }
+ 
++#ifdef AVM_EMSCRIPTEN_NO_PTHREAD
++    if (main_loop_started) {
++        return result;
++    }
++#endif
++
+     return result;
+ }
