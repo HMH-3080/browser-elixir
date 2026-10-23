@@ -12,6 +12,11 @@ This is the runtime behind adding an `elixir` language to [LiveCodes](https://li
 the same shape as [`browser-haskell`](https://github.com/live-codes/browser-haskell) was for
 `haskell-wasm`.
 
+The no-pthread AtomVM build used by LiveCodes lives in [`runtime/`](runtime/README.md), together
+with the FissionVM patch, build/check scripts, and the [benchmark](benchmark.md). It runs without
+`SharedArrayBuffer` or COOP/COEP. The demo page below still loads Popcorn's pthread runtime from the
+mirror, so it still requires cross-origin isolation.
+
 ## Demo
 
 ```bash
@@ -125,6 +130,8 @@ Behaviour worth knowing before you trust a snippet:
 public/index.html     the harness page (language + example pickers, result, stdout/stderr, timings)
 public/main.js        the driver: boots Popcorn, wraps runs (stdin + exit code), recovers a dead VM
 public/wasm/          the 2 patched runtime scripts — see WASM.md; everything else is mirrored
+runtime/              no-pthread AtomVM build: FissionVM patch, scripts, checksums, docs
+benchmark.md          Elixir (Wasm) performance notes and AtomVM/Popcorn comparison
 serve.js              static server: COOP/COEP, MIME types, caching, --no-isolation
 WASM.md               where the runtime comes from, the mirror pin, and the four deviations
 FINDINGS.md           the spike log: what was verified, what breaks, what it means
@@ -141,6 +148,8 @@ The demo is verified by *running* it, not by importing it — recorded outputs a
 | --- | --- |
 | serve the page | `npm start` → http://localhost:8125/ |
 | check syntax | `npm run check` |
+| build the no-pthread runtime | `npm run build:runtime` |
+| check the no-pthread runtime | `npm run check:runtime` |
 | prove isolation is required | `npm run start:no-isolation`, then reload — boot fails |
 | use a different mirror | append `?baseUrl=https://…/` |
 
@@ -151,9 +160,9 @@ Spike complete. The page boots AtomVM from a mirrored runtime, evaluates Elixir 
 end in headless Chrome against the pinned CDN. Elixir runs additionally read `stdin`, report an exit
 code and survive a runtime error ([FINDINGS.md](FINDINGS.md) §13).
 
-Next: the LiveCodes `lang-elixir` entry (`vendors.ts` URL, build-script and docs wiring) — where the
-worker/same-origin constraint from [WASM.md](WASM.md) has to be solved properly, and where cooking
-our own `bundle.avm` against a pinned `@swmansion/popcorn` would let the scripts be mirrored too.
+The no-pthread build in [`runtime/`](runtime/README.md) is the runtime LiveCodes ships. It removes
+the isolation requirement for the embedded playground. The demo page still uses the Popcorn mirror
+and its pthread runtime; wiring the no-pthread build into the demo is a separate step.
 
 ## License
 
