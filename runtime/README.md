@@ -1,9 +1,8 @@
 # Single-threaded AtomVM runtime
 
 This directory builds the **no-pthread** AtomVM runtime used by the LiveCodes Elixir/Erlang
-languages, together with the Elixir/Erlang bytecode bundle it runs. LiveCodes currently pins an
-earlier build through the `@hmh-3080/atomvm-wasm` npm package; the checksummed files in `wasm/` are
-the ones produced here.
+languages, together with the Elixir/Erlang bytecode bundle it runs. LiveCodes pins the checksummed
+files in `wasm/` by commit from this repository.
 
 The build does not use Emscripten pthreads, so the output does not need `SharedArrayBuffer`,
 `Cross-Origin-Opener-Policy`, or `Cross-Origin-Embedder-Policy`. It works in normal
