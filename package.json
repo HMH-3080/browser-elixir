@@ -10,6 +10,7 @@
     "start:credentialless": "node serve.js 8125 public --credentialless",
     "start:no-isolation": "node serve.js 8125 public --no-isolation",
     "build:runtime": "bash runtime/scripts/build.sh",
+    "build:bundle": "bash runtime/scripts/build-bundle.sh",
     "check:runtime": "bash runtime/scripts/check.sh",
     "check": "node --check serve.js && node --check public/main.js && node --check public/wasm/popcorn.js && node --check public/wasm/popcorn_iframe.js"
   }

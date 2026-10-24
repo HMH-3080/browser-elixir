@@ -9,7 +9,7 @@ BUILD_DIR="${BUILD_DIR:-$FISSIONVM_DIR/src/platforms/emscripten/build-single}"
 FISSIONVM_REF="${FISSIONVM_REF:-6c3208c7b3dbc7dacc35a19f8de1fa80b358ac73}"
 MBEDTLS_REF="${MBEDTLS_REF:-v3.6.3.1}"
 EMSDK_IMAGE="${EMSDK_IMAGE:-emscripten/emsdk:3.1.74}"
-BUNDLE_URL="${BUNDLE_URL:-https://cdn.jsdelivr.net/gh/live-codes/elixir-browser-eval@6b354dab35fb7454ba2812f935b52b398ca1bec8/wasm/bundle.avm}"
+BUNDLE_URL="${BUNDLE_URL:-}"
 
 mkdir -p "$BUILD_ROOT" "$ROOT/wasm"
 
@@ -71,7 +71,12 @@ else
   build_docker
 fi
 
-curl -fL "$BUNDLE_URL" -o "$ROOT/wasm/bundle.avm"
+if [ -n "$BUNDLE_URL" ]; then
+  echo "Downloading bundle from $BUNDLE_URL" >&2
+  curl -fL "$BUNDLE_URL" -o "$ROOT/wasm/bundle.avm"
+else
+  "$ROOT/scripts/build-bundle.sh"
+fi
 sha256sum "$ROOT/wasm/AtomVM.mjs" "$ROOT/wasm/AtomVM.wasm" "$ROOT/wasm/bundle.avm" \
   | sed "s#$ROOT/wasm/##" > "$ROOT/scripts/checksums.txt"
 "$ROOT/scripts/check.sh"

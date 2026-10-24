@@ -13,9 +13,9 @@ the same shape as [`browser-haskell`](https://github.com/live-codes/browser-hask
 `haskell-wasm`.
 
 The no-pthread AtomVM build used by LiveCodes lives in [`runtime/`](runtime/README.md), together
-with the FissionVM patch, build/check scripts, and the [benchmark](benchmark.md). It runs without
-`SharedArrayBuffer` or COOP/COEP. The demo page below still loads Popcorn's pthread runtime from the
-mirror, so it still requires cross-origin isolation.
+with the FissionVM patch, the bundle recipe, build/check scripts, and the [benchmark](benchmark.md).
+It runs without `SharedArrayBuffer` or COOP/COEP. The demo page below still loads Popcorn's pthread
+runtime from the mirror, so it still requires cross-origin isolation.
 
 ## Demo
 
@@ -31,8 +31,8 @@ standard input in either language, and the footer reports the run's exit code.
 A server is required, and it must set two cross-origin isolation headers — see
 [Limitations](#limitations). `file://` will not work, and neither will a plain static server.
 
-**The runtime comes from a CDN.** The whole runtime — `bundle.avm`, `AtomVM.wasm` and
-`AtomVM.mjs` — is fetched from a mirror of
+**The demo page loads its runtime from a CDN.** `bundle.avm`, `AtomVM.wasm` and `AtomVM.mjs` are
+fetched from a mirror of
 [`live-codes/elixir-browser-eval`](https://github.com/live-codes/elixir-browser-eval), pinned to a
 commit. Point it elsewhere with `?baseUrl=`:
 
@@ -130,7 +130,7 @@ Behaviour worth knowing before you trust a snippet:
 public/index.html     the harness page (language + example pickers, result, stdout/stderr, timings)
 public/main.js        the driver: boots Popcorn, wraps runs (stdin + exit code), recovers a dead VM
 public/wasm/          the 2 patched runtime scripts — see WASM.md; everything else is mirrored
-runtime/              no-pthread AtomVM build: FissionVM patch, scripts, checksums, docs
+runtime/              no-pthread AtomVM + bundle build, committed artifacts, scripts, checksums, docs
 benchmark.md          Elixir (Wasm) performance notes and AtomVM/Popcorn comparison
 serve.js              static server: COOP/COEP, MIME types, caching, --no-isolation
 WASM.md               where the runtime comes from, the mirror pin, and the four deviations
@@ -149,6 +149,7 @@ The demo is verified by *running* it, not by importing it — recorded outputs a
 | serve the page | `npm start` → http://localhost:8125/ |
 | check syntax | `npm run check` |
 | build the no-pthread runtime | `npm run build:runtime` |
+| build the bytecode bundle only | `npm run build:bundle` |
 | check the no-pthread runtime | `npm run check:runtime` |
 | prove isolation is required | `npm run start:no-isolation`, then reload — boot fails |
 | use a different mirror | append `?baseUrl=https://…/` |
@@ -161,8 +162,10 @@ end in headless Chrome against the pinned CDN. Elixir runs additionally read `st
 code and survive a runtime error ([FINDINGS.md](FINDINGS.md) §13).
 
 The no-pthread build in [`runtime/`](runtime/README.md) is the runtime LiveCodes ships. It removes
-the isolation requirement for the embedded playground. The demo page still uses the Popcorn mirror
-and its pthread runtime; wiring the no-pthread build into the demo is a separate step.
+the isolation requirement for the embedded playground. Both `AtomVM.mjs`/`AtomVM.wasm` and the
+cooked `bundle.avm` are built from source by `runtime/scripts/` and committed under `runtime/wasm/`
+with checksums. The demo page still uses the Popcorn mirror and its pthread runtime; wiring the
+no-pthread build into the demo is a separate step.
 
 ## License
 

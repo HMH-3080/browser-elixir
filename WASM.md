@@ -1,7 +1,9 @@
 # Where the runtime comes from
 
-**The whole runtime is served from a mirror.** The only things this repo ships are the two runtime
-scripts it patches — ~20 KB — and they are loaded same-origin because they *are* the patches.
+The **demo page** loads its runtime from a mirror. The only runtime files this repo ships for the
+demo are the two scripts it patches — ~20 KB — and they are loaded same-origin because they *are*
+the patches. (The no-pthread runtime that LiveCodes ships is built in [`runtime/`](runtime/README.md)
+and committed; see [Single-threaded build](#single-threaded-build).)
 
 | file | bytes | served from | patched? |
 | --- | --- | --- | --- |
@@ -11,7 +13,9 @@ scripts it patches — ~20 KB — and they are loaded same-origin because they *
 | `AtomVM.wasm` | 997,332 | **the mirror** | no |
 | `bundle.avm` | 7,114,092 | **the mirror** | no |
 
-So the 8.1 MB of runtime and binaries come from a CDN, and nothing large is committed.
+So the 8.1 MB of runtime and binaries used by the demo page come from a CDN, and nothing large is
+committed for it. The single-threaded runtime that LiveCodes ships is separate: it is built and
+committed under [`runtime/`](runtime/README.md).
 
 ## Default mirror
 
@@ -101,14 +105,15 @@ Everything else is upstream and unmodified. When updating the runtime, re-apply 
 
 ## Single-threaded build
 
-[`runtime/`](runtime/README.md) builds a **no-pthread** AtomVM from FissionVM. That build does not
-use `SharedArrayBuffer` and does not need COOP/COEP; it is the runtime LiveCodes ships as
-[`@hmh-3080/atomvm-wasm`](https://www.npmjs.com/package/@hmh-3080/atomvm-wasm). It is built
-independently of the Popcorn mirror described above, and the demo page does not load it yet.
+[`runtime/`](runtime/README.md) builds a **no-pthread** AtomVM from FissionVM and cooks
+`bundle.avm` from Popcorn `v0.2.2`'s eval server. Neither needs `SharedArrayBuffer` nor COOP/COEP.
+This is the runtime LiveCodes ships; the artifacts are committed under `runtime/wasm/` with SHA-256
+checksums in `runtime/scripts/checksums.txt`. It is built independently of the Popcorn mirror
+described above, and the demo page does not load it yet.
 
-## Rebuilding the runtime
+## Rebuilding the demo runtime
 
-To own the whole stack — and to lift the 16 MiB heap ceiling described in
+To own the whole demo stack — and to lift the 16 MiB heap ceiling described in
 [FINDINGS.md](FINDINGS.md) — clone Popcorn at the tag matching `@swmansion/popcorn@0.3.3`, install
 the pinned toolchain with `mise install`, then:
 
@@ -119,4 +124,5 @@ mix popcorn.cook
 ```
 
 That emits `popcorn.js`, `popcorn_iframe.js`, `AtomVM.mjs`, `AtomVM.wasm` and `bundle.avm` as one
-matched set — take all of them, then re-apply the four patches above.
+matched set — take all of them, then re-apply the four patches above. This path is separate from
+the no-pthread runtime in `runtime/`.

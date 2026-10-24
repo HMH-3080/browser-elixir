@@ -1,0 +1,36 @@
+name: runtime
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'runtime/**'
+      - '.github/workflows/runtime.yml'
+  pull_request:
+    paths:
+      - 'runtime/**'
+      - '.github/workflows/runtime.yml'
+  workflow_dispatch:
+
+jobs:
+  check:
+    name: Verify committed artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check files and checksums
+        run: bash runtime/scripts/check.sh
+
+  build:
+    name: Build runtime from source
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build AtomVM and bundle
+        run: bash runtime/scripts/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: runtime-wasm
+          path: runtime/wasm/
+          if-no-files-found: error

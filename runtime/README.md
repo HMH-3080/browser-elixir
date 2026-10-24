@@ -14,18 +14,24 @@ toolchain for the runtime LiveCodes ships.
 
 ## Output
 
+`wasm/` is committed so LiveCodes can pin an exact commit:
+
 - `wasm/AtomVM.mjs` — Emscripten JavaScript loader.
 - `wasm/AtomVM.wasm` — AtomVM WebAssembly binary.
-- `wasm/bundle.avm` — Elixir 1.17.3 / OTP 27 bytecode bundle (Elixir and Erlang), pinned from
-  [`live-codes/elixir-browser-eval@6b354da`](https://github.com/live-codes/elixir-browser-eval/tree/6b354dab35fb7454ba2812f935b52b398ca1bec8/wasm).
+- `wasm/bundle.avm` — Elixir 1.17.3 / OTP 26.0.2 bytecode bundle carrying the Elixir and Erlang
+  compilers.
 
-`wasm/` is generated and is not committed.
+`scripts/checksums.txt` pins the SHA-256 of all three.
 
 ## Build
 
 ```bash
-npm run build:runtime
+npm run build:runtime   # AtomVM + bundle
+npm run build:bundle    # bundle only, reusing the existing AtomVM build
+npm run check:runtime
 ```
+
+### AtomVM
 
 The script starts from
 [`software-mansion-labs/FissionVM`](https://github.com/software-mansion-labs/FissionVM) at commit
@@ -42,6 +48,31 @@ The patch contains:
 - no-op pthread/signal paths when `AVM_NO_SMP` is set;
 - the missing `erlang:md5/1` NIF backed by mbedTLS, required by OTP's compiler.
 
+### Bundle
+
+`bundle/` is Popcorn's `v0.2.2` `examples/eval-in-wasm`, reduced to what the cook step needs: a
+`mix.exs` that depends on Popcorn, and the `EvalInWasm` GenServer plus application module that
+evaluate Elixir and Erlang inside the VM. `scripts/build-bundle.sh` cooks it with
+`mix deps.get --only prod && MIX_ENV=prod mix popcorn.cook` and copies `dist/wasm/bundle.avm` to
+`wasm/bundle.avm`.
+
+The Popcorn tag is pinned because the bundle and the worker in LiveCodes are a matched pair.
+Upgrading it means re-checking the `Popcorn.Wasm` message protocol against
+`src/livecodes/languages/beam-wasm/lang-beam-wasm-worker.raw.js` there.
+
+The cook needs the host Elixir/OTP pair that Popcorn supports. The script uses a local `elixir` and
+`mix` when they report exactly 1.17.3 / OTP 26.0.2, and otherwise Docker with
+`hexpm/elixir:1.17.3-erlang-26.0.2-debian-bookworm-20261020-slim` (override with
+`BUNDLE_DOCKER_IMAGE`). No bundle is downloaded.
+
+#### Why Elixir 1.17.3
+
+Popcorn 0.2.x and 0.3.x read `OTP_VERSION` from the host installation at compile time and raise
+unless the pair is OTP 26.0.2 / Elixir 1.17.3. The bundle also carries Popcorn's OTP and Elixir
+patches for that pair, so a newer Elixir such as 1.20.4 would need those patches ported. Popcorn has
+since moved its supported target to a full-BEAM Wasm runtime, which this single-threaded AtomVM build
+does not run. The pair stays pinned until upstream supports another one.
+
 ## Checks
 
 ```bash
@@ -54,23 +85,26 @@ that still references pthreads or `SharedArrayBuffer`.
 ## Upgrading
 
 The build inputs are overridable environment variables, so an upgrade does not require editing the
-script:
+scripts:
 
 | Variable | Default |
 | --- | --- |
 | `FISSIONVM_REF` | pinned FissionVM commit |
 | `MBEDTLS_REF` | `v3.6.3.1` |
 | `EMSDK_IMAGE` | `emscripten/emsdk:3.1.74` |
-| `BUNDLE_URL` | pinned `live-codes/elixir-browser-eval` bundle |
+| `BUNDLE_DOCKER_IMAGE` | pinned `hexpm/elixir` cook image |
+| `BUNDLE_URL` | unset: cook `bundle/`; set it to reuse an existing bundle |
 
 ```bash
-FISSIONVM_REF=<new-commit> MBEDTLS_REF=<new-tag> BUNDLE_URL=<new-url> npm run build:runtime
+FISSIONVM_REF=<new-commit> MBEDTLS_REF=<new-tag> npm run build:runtime
 npm run check:runtime
 ```
 
-Then bump the package version, publish with `npm publish --access public`, and update the package
-version in LiveCodes (`src/livecodes/vendors.ts`). Run the LiveCodes Elixir/Erlang Playwright suites
-before merging.
+Commit `wasm/` and `scripts/checksums.txt`, then pin the new commit in LiveCodes
+(`src/livecodes/vendors.ts`) and run the Elixir/Erlang Playwright suites before merging.
+
+The Popcorn tag is pinned in `bundle/mix.exs`; change it together with `BUNDLE_DOCKER_IMAGE`, because
+the cook image must match the Elixir/OTP pair that tag supports.
 
 If FissionVM changed the files touched by `patches/fissionvm-no-pthread.patch`, rebase the patch
 onto the new commit, rebuild, and confirm the output still has `callMain` and no
