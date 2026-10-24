@@ -161,11 +161,11 @@ Spike complete. The page boots AtomVM from a mirrored runtime, evaluates Elixir 
 end in headless Chrome against the pinned CDN. Elixir runs additionally read `stdin`, report an exit
 code and survive a runtime error ([FINDINGS.md](FINDINGS.md) §13).
 
-The no-pthread build in [`runtime/`](runtime/README.md) is the runtime LiveCodes ships. It removes
-the isolation requirement for the embedded playground. Both `AtomVM.mjs`/`AtomVM.wasm` and the
-cooked `bundle.avm` are built from source by `runtime/scripts/` and committed under `runtime/wasm/`
-with checksums. The demo page still uses the Popcorn mirror and its pthread runtime; wiring the
-no-pthread build into the demo is a separate step.
+The no-pthread build in [`runtime/`](runtime/README.md) is the runtime for the LiveCodes Elixir and
+Erlang languages. It removes the isolation requirement for the embedded playground. Both
+`AtomVM.mjs`/`AtomVM.wasm` and the cooked `bundle.avm` are built from source by `runtime/scripts/`
+and committed under `runtime/wasm/` with checksums. The demo page still uses the Popcorn mirror and
+its pthread runtime; wiring the no-pthread build into the demo is a separate step.
 
 ## License
 

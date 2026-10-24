@@ -107,9 +107,9 @@ Everything else is upstream and unmodified. When updating the runtime, re-apply 
 
 [`runtime/`](runtime/README.md) builds a **no-pthread** AtomVM from FissionVM and cooks
 `bundle.avm` from Popcorn `v0.2.2`'s eval server. Neither needs `SharedArrayBuffer` nor COOP/COEP.
-This is the runtime LiveCodes ships; the artifacts are committed under `runtime/wasm/` with SHA-256
-checksums in `runtime/scripts/checksums.txt`. It is built independently of the Popcorn mirror
-described above, and the demo page does not load it yet.
+This is the runtime for the LiveCodes Elixir/Erlang languages; the artifacts are committed under
+`runtime/wasm/` with SHA-256 checksums in `runtime/scripts/checksums.txt`. It is built independently
+of the Popcorn mirror described above, and the demo page does not load it yet.
 
 ## Rebuilding the demo runtime
 
