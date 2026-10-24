@@ -1,3 +1,6 @@
+# Adapted from Popcorn v0.2.2, examples/eval-in-wasm (Apache-2.0).
+# https://github.com/software-mansion/popcorn/tree/v0.2.2/examples/eval-in-wasm
+
 defmodule EvalInWasm do
   @moduledoc false
   use GenServer

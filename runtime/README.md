@@ -117,5 +117,5 @@ The runtime measurements and the AtomVM/Popcorn comparison are in
 
 ## License
 
-AtomVM and FissionVM are Apache-2.0. Elixir and Erlang/OTP are Apache-2.0. Popcorn is MIT. See
-[`../LICENSE`](../LICENSE) and the upstream projects for details.
+AtomVM and FissionVM are Apache-2.0. Elixir and Erlang/OTP are Apache-2.0. Popcorn is
+Apache-2.0. See [`../LICENSE`](../LICENSE) and the upstream projects for details.

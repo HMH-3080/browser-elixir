@@ -60,5 +60,19 @@ else
 fi
 
 test -s "$OUT_DIR/bundle.avm" || { echo "bundle.avm was not produced" >&2; exit 1; }
+
+# Keep the bundle checksum in sync when this script runs on its own.
+CHECKSUMS="$ROOT/scripts/checksums.txt"
+if [ -f "$CHECKSUMS" ]; then
+  digest="$(sha256sum "$OUT_DIR/bundle.avm" | cut -d' ' -f1)"
+  tmp="$CHECKSUMS.tmp"
+  awk -v digest="$digest" '
+    $2 == "bundle.avm" { print digest "  bundle.avm"; found = 1; next }
+    { print }
+    END { if (!found) print digest "  bundle.avm" }
+  ' "$CHECKSUMS" > "$tmp"
+  mv "$tmp" "$CHECKSUMS"
+fi
+
 sha256sum "$OUT_DIR/bundle.avm" | sed "s#$OUT_DIR/##"
 echo "Built bundle in $OUT_DIR/bundle.avm" >&2
